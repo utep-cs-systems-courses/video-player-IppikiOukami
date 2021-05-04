@@ -1,0 +1,79 @@
+import cv2
+import threading
+import queue
+import os
+
+lock = threading.Lock()
+
+class pcQueue():
+    def __init__(self):
+        self.sem = threading.Semaphore(10) # limits queue to only 10 frames
+        self.que = queue.Queue()
+
+    def put(self, frame):
+        self.sem.acquire()
+        lock.acquire()
+        self.que.put(frame)
+        lock.release()
+
+    def get(self):
+        self.sem.release()
+        lock.acquire()
+        frame = self.que.get()
+        lock.release()
+        return frame
+
+    def isEmpty(self):
+        lock.acquire()
+        empty = self.que.empty()
+        lock.release()
+        return empty
+
+def convertToGray(producer, consumer, maxFrames):
+    count = 0
+    while True:
+        if proQue.isEmpty(): continue
+        Frame = producer.get()
+        if count == maxFrames: break
+        print(f'Frame {count} of {maxFrames}')
+        grayScaleFrame = cv2.cvtColor(Frame, cv2.COLOR_BGR2GRAY)
+        consumer.put(grayScaleFrame)
+        count += 1
+    print("Grayscale Complete!")
+
+def extractFrames(producer, fileName, maxFrames):
+    count = 0
+    vidcap = cv2.VideoCapture(fileName)
+    status, image = vidcap.read()
+    while status and count < maxFrames:
+        status, jpgImage = cv2.imencode('.jpg',image)
+        producer.put(image)
+        status, image = vidcap.read()
+        print(f'Reading frame {count}/{status}')
+        count += 1
+    print('Extraction Complete')
+
+def displayFrames(consumer, maxFrames):
+    count = 0
+    while True:
+        if consumer.isEmpty(): continue
+        if count == maxFrames: break
+        displayFrame = consumer.get()
+        print(f'Displaying frame {count}')
+        cv2.imshow('Video', displayFrame)
+        if cv2.waitKey(42) and 0xFF == ord('q'): break
+        count += 1
+    print('Display Complete!')
+    cv2.destroyAllWindows()
+
+proQue = pcQueue()
+conQue = pcQueue()
+fileName = 'clip.mp4'
+maxFrames = 9999
+extract = threading.Thread(target = extractFrames, args = (proQue,fileName,maxFrames))
+convert = threading.Thread(target = convertToGray, args = (proQue, conQue, maxFrames))
+display = threading.Thread(target = displayFrames, args = (conQue, maxFrames))
+
+extract.start()
+convert.start()
+display.start()
