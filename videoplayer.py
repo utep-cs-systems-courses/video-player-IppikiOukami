@@ -7,20 +7,23 @@ lock = threading.Lock()
 
 class pcQueue():
     def __init__(self):
-        self.sem = threading.Semaphore(10) # limits queue to only 10 frames
+        self.full = threading.Semaphore(0)   # allows 0 frames of space
+        self.empty = threading.Semaphore(10) # allows 10 frames of space
         self.que = queue.Queue()
 
     def put(self, frame):
-        self.sem.acquire()                 # prevent others from accessing 
-        lock.acquire()                     # lock the thread 
-        self.que.put(frame)                # add a frame to the queue
-        lock.release()                     # release the thread
+        self.empty.acquire()                 # reduce number of spots available in queue 
+        lock.acquire()                       # lock the thread 
+        self.que.put(frame)                  # add a frame to the queue
+        lock.release()                       # release the thread
+        self.full.release()                  # start filling available spots
 
     def get(self):
-        self.sem.release()                 # allow access back to the queue
+        self.full.acquire()                  # allow access back to the queue
         lock.acquire()                     
-        frame = self.que.get()             # get the first element from the queue "pop"
+        frame = self.que.get()               # get the first element from the queue "pop"
         lock.release()
+        self.empty.release()                 # add more available spots (item has made a spot available after "pop")
         return frame
 
     def isEmpty(self):
@@ -29,50 +32,55 @@ class pcQueue():
         lock.release()
         return empty
 
-def convertToGray(producer, consumer, maxFrames):
+def convertToGray(producer, consumer):
     count = 0
     while True:
         if proQue.isEmpty(): continue      # Cycle until a frame becomes available
-        Frame = producer.get()             # grab unedited frame from producer queue
-        if count == maxFrames: break       # at limit, stop conversion
-        print(f'Frame {count} of {maxFrames}')
-        grayScaleFrame = cv2.cvtColor(Frame, cv2.COLOR_BGR2GRAY) # convert from color to gray
-        consumer.put(grayScaleFrame)       # put converted frame into consumer queue
-        count += 1
+        else:
+            Frame = producer.get()             # grab unedited frame from producer queue
+            if Frame is None: break
+            print(f'Con frame {count}')
+            grayScaleFrame = cv2.cvtColor(Frame, cv2.COLOR_BGR2GRAY) # convert from color to gray
+            consumer.put(grayScaleFrame)       # put converted frame into consumer queue
+            count += 1
     print("Grayscale Complete!")
+    consumer.put(None)
 
 def extractFrames(producer, fileName, maxFrames):
     count = 0
-    vidcap = cv2.VideoCapture(fileName)    # file containing video clip to edit
-    status, image = vidcap.read()          # read the video 
+    vidcap = cv2.VideoCapture(fileName)        # file containing video clip to edit
+    status, image = vidcap.read()              # read the video 
     while status and count < maxFrames:
         status, jpgImage = cv2.imencode('.jpg',image) # get image from video ('Frame') 
-        producer.put(image)                # put image into producer queue
-        status, image = vidcap.read()      # prepare next video portion for frame
-        print(f'Reading frame {count}/{status}')
+        producer.put(image)                    # put image into producer queue
+        status, image = vidcap.read()          # prepare next video portion for frame
+        print(f'Ext frame {count}')
         count += 1
-    print('Extraction Complete')
+    print('Extraction Complete!')
+    producer.put(None)
 
-def displayFrames(consumer, maxFrames):
+# Same pattern of execution should appear not 10 then 1
+def displayFrames(consumer):
     count = 0
     while True:
-        if consumer.isEmpty(): continue    # cycle until consumer has a frame
-        if count == maxFrames: break       # at limit, stop display
-        displayFrame = consumer.get()      # get first frame from consumer queue
-        print(f'Displaying frame {count}')
-        cv2.imshow('Video', displayFrame)  # show frame onto display
-        if cv2.waitKey(1) and 0xFF == ord('q'): break # if q is pressed stop display 
-        count += 1
+        if consumer.isEmpty(): continue        # cycle until consumer has a frame
+        else:
+            displayFrame = consumer.get()      # get first frame from consumer queue
+            if displayFrame is None: break     # break at None identifier
+            print(f'Dis frame {count}')
+            cv2.imshow('Video', displayFrame)  # show frame onto display
+            if cv2.waitKey(42) and 0xFF == ord('q'): break # if q is pressed stop display 
+            count += 1
+    cv2.destroyAllWindows()                    # close all windows
     print('Display Complete!')
-    cv2.destroyAllWindows()                # close all windows
-
-proQue = pcQueue()                         # initialize producer
-conQue = pcQueue()                         # initialize consumer
+    
+proQue = pcQueue()                             # initialize producer
+conQue = pcQueue()                             # initialize consumer
 fileName = 'clip.mp4'
-maxFrames = 9999
-extract = threading.Thread(target = extractFrames, args = (proQue,fileName,maxFrames))
-convert = threading.Thread(target = convertToGray, args = (proQue, conQue, maxFrames))
-display = threading.Thread(target = displayFrames, args = (conQue, maxFrames))
+maxFrames = 300
+extract = threading.Thread(target = extractFrames, args = (proQue,fileName,maxFrames)) # completing
+convert = threading.Thread(target = convertToGray, args = (proQue, conQue)) # completing 
+display = threading.Thread(target = displayFrames, args = {conQue})
 
 extract.start()
 convert.start()
