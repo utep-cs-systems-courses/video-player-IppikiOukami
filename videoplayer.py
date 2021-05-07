@@ -12,23 +12,23 @@ class pcQueue():
         self.que = queue.Queue()
 
     def put(self, frame):
-        self.empty.acquire()                 # reduce number of spots available in queue 
-        lock.acquire()                       # lock the thread 
+        self.empty.acquire()                 # reduce number of available spots from empty (spot filled by enqueue)
+        lock.acquire()                       # avoid race condition 
         self.que.put(frame)                  # add a frame to the queue
-        lock.release()                       # release the thread
-        self.full.release()                  # start filling available spots
+        lock.release()                       
+        self.full.release()                  # increment full (spot has been taken by enqueue)
 
     def get(self):
-        self.full.acquire()                  # allow access back to the queue
-        lock.acquire()                     
+        self.full.acquire()                  # remove a spot from full
+        lock.acquire()                       # avoid race condition
         frame = self.que.get()               # get the first element from the queue "pop"
         lock.release()
-        self.empty.release()                 # add more available spots (item has made a spot available after "pop")
+        self.empty.release()                 # add a spot to empty (more spots opened up after dequeue)
         return frame
 
     def isEmpty(self):
-        lock.acquire()
-        empty = self.que.empty()           # returns true if empty, false otherwise
+        lock.acquire()                       # avoid race condition
+        empty = self.que.empty()             # returns true if empty, false otherwise
         lock.release()
         return empty
 
@@ -39,7 +39,7 @@ def convertToGray(producer, consumer):
         else:
             Frame = producer.get()             # grab unedited frame from producer queue
             if Frame is None: break
-            print(f'Con frame {count}')
+            print(f'Converted frame #{count}')
             grayScaleFrame = cv2.cvtColor(Frame, cv2.COLOR_BGR2GRAY) # convert from color to gray
             consumer.put(grayScaleFrame)       # put converted frame into consumer queue
             count += 1
@@ -54,7 +54,7 @@ def extractFrames(producer, fileName, maxFrames):
         status, jpgImage = cv2.imencode('.jpg',image) # get image from video ('Frame') 
         producer.put(image)                    # put image into producer queue
         status, image = vidcap.read()          # prepare next video portion for frame
-        print(f'Ext frame {count}')
+        print(f'Extracted frame #{count}')
         count += 1
     print('Extraction Complete!')
     producer.put(None)
@@ -67,7 +67,7 @@ def displayFrames(consumer):
         else:
             displayFrame = consumer.get()      # get first frame from consumer queue
             if displayFrame is None: break     # break at None identifier
-            print(f'Dis frame {count}')
+            print(f'Display frame #{count}')
             cv2.imshow('Video', displayFrame)  # show frame onto display
             if cv2.waitKey(42) and 0xFF == ord('q'): break # if q is pressed stop display 
             count += 1
